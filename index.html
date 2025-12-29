@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>5-Round Math Quiz</title>
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: system-ui, -apple-system, Arial, sans-serif;
+      background: #0b0f1a;
+      color: #fff;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    .app {
+      min-height: 100vh;
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 16px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .topbar {
+      display: flex;
+      gap: 10px;
+    }
+
+    .pill {
+      flex: 1;
+      text-align: center;
+      padding: 10px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .card {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px;
+      padding: 16px;
+    }
+
+    /* Timer bar */
+    .timerWrap {
+      margin-top: 12px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 999px;
+      overflow: hidden;
+      height: 10px;
+    }
+    .timerBar {
+      height: 100%;
+      width: 100%;
+      background: rgba(255,255,255,0.55);
+      transform-origin: left center;
+      transform: scaleX(1);
+    }
+
+    .question {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 0.2px;
+    }
+
+    .hint {
+      margin: 8px 0 0;
+      color: rgba(255,255,255,0.75);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .choices {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .choiceBtn {
+      width: 100%;
+      padding: 16px;
+      border-radius: 16px;
+      border: 2px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+      font-weight: 900;
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    .choiceBtn:disabled {
+      opacity: 0.95;
+      cursor: default;
+    }
+
+    .correct { border-color: #22c55e !important; } /* green */
+    .wrong   { border-color: #ef4444 !important; } /* red */
+
+    .restart {
+      width: 100%;
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.10);
+      color: #fff;
+      font-weight: 900;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    .footer {
+      margin-top: auto;
+      text-align: center;
+      color: rgba(255,255,255,0.6);
+      font-size: 12px;
+      padding: 10px 0 6px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <div class="topbar">
+      <div class="pill" id="roundPill">Round 1 / 5</div>
+      <div class="pill" id="scorePill">Score: 0</div>
+    </div>
+
+    <div class="card" id="gameCard">
+      <p class="question" id="questionText">Loading…</p>
+      <p class="hint" id="hintText">Tap an answer.</p>
+
+      <div class="timerWrap" aria-label="Timer">
+        <div class="timerBar" id="timerBar"></div>
+      </div>
+
+      <div class="choices" id="choicesArea"></div>
+
+      <button class="restart" id="restartBtn" style="display:none;">Restart</button>
+    </div>
+
+    <div class="footer">Mobile math quiz • 5 rounds • 3s timer</div>
+  </div>
+
+<script>
+  // ✅ Your quiz
+  const QUIZ = [
+    { q: "46 + 127 = ?", correct: 173, choices: [163, 173, 193, 153] },
+    { q: "82 + 29 = ?",  correct: 111, choices: [121, 91, 111, 141] },
+    { q: "75 + 67 = ?",  correct: 142, choices: [133, 145, 132, 142] },
+    { q: "66 + 48 = ?",  correct: 114, choices: [114, 125, 124, 154] },
+    { q: "96 + 189 = ?", correct: 285, choices: [275, 277, 285, 216] },
+  ];
+
+  const TIME_LIMIT_MS = 3000;   // 3 seconds per question
+  const FEEDBACK_MS   = 600;    // time to show red/green before moving on
+  const TICK_MS       = 40;     // timer bar update smoothness
+
+  let idx = 0;
+  let score = 0;
+
+  // timer state
+  let roundStart = 0;
+  let timerInterval = null;
+  let timeoutHandle = null;
+  let locked = false; // prevents double answering
+
+  const roundPill = document.getElementById("roundPill");
+  const scorePill = document.getElementById("scorePill");
+  const questionText = document.getElementById("questionText");
+  const hintText = document.getElementById("hintText");
+  const choicesArea = document.getElementById("choicesArea");
+  const restartBtn = document.getElementById("restartBtn");
+  const timerBar = document.getElementById("timerBar");
+
+  function setPills() {
+    roundPill.textContent = `Round ${Math.min(idx + 1, QUIZ.length)} / ${QUIZ.length}`;
+    scorePill.textContent = `Score: ${score}`;
+  }
+
+  function clearTimers() {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    if (timeoutHandle) { clearTimeout(timeoutHandle); timeoutHandle = null; }
+  }
+
+  function disableAllChoices() {
+    const btns = choicesArea.querySelectorAll("button");
+    btns.forEach(b => b.disabled = true);
+  }
+
+  function highlightCorrect(correctVal) {
+    const btns = choicesArea.querySelectorAll("button");
+    btns.forEach(b => {
+      if (Number(b.textContent) === correctVal) b.classList.add("correct");
+    });
+  }
+
+  function startTimer() {
+    clearTimers();
+    locked = false;
+
+    roundStart = performance.now();
+    timerBar.style.transform = "scaleX(1)";
+
+    timerInterval = setInterval(() => {
+      const elapsed = performance.now() - roundStart;
+      const remaining = Math.max(0, TIME_LIMIT_MS - elapsed);
+      const ratio = remaining / TIME_LIMIT_MS;
+      timerBar.style.transform = `scaleX(${ratio})`;
+      if (remaining <= 0) {
+        // interval will be cleared by the timeout handler
+        timerBar.style.transform = "scaleX(0)";
+      }
+    }, TICK_MS);
+
+    timeoutHandle = setTimeout(() => {
+      // time's up
+      if (locked) return;
+      locked = true;
+
+      disableAllChoices();
+      const item = QUIZ[idx];
+      hintText.textContent = `Time’s up ❌ (Answer: ${item.correct})`;
+      highlightCorrect(item.correct);
+
+      clearTimers();
+      setTimeout(nextRound, FEEDBACK_MS);
+    }, TIME_LIMIT_MS);
+  }
+
+  function renderQuestion() {
+    setPills();
+    restartBtn.style.display = "none";
+
+    const item = QUIZ[idx];
+    questionText.textContent = item.q;
+    hintText.textContent = "Tap an answer (3 seconds).";
+
+    choicesArea.innerHTML = "";
+    item.choices.forEach((value) => {
+      const btn = document.createElement("button");
+      btn.className = "choiceBtn";
+      btn.textContent = value;
+      btn.addEventListener("click", () => handleAnswer(btn, value));
+      choicesArea.appendChild(btn);
+    });
+
+    startTimer();
+  }
+
+  function handleAnswer(clickedBtn, value) {
+    if (locked) return;
+    locked = true;
+
+    clearTimers();
+    disableAllChoices();
+
+    const item = QUIZ[idx];
+    const isCorrect = value === item.correct;
+
+    if (isCorrect) {
+      score += 1;
+      clickedBtn.classList.add("correct");
+      hintText.textContent = "Correct ✅";
+    } else {
+      clickedBtn.classList.add("wrong");
+      hintText.textContent = `Wrong ❌ (Answer: ${item.correct})`;
+      highlightCorrect(item.correct);
+    }
+
+    scorePill.textContent = `Score: ${score}`;
+    timerBar.style.transform = "scaleX(0)";
+
+    setTimeout(nextRound, FEEDBACK_MS);
+  }
+
+  function nextRound() {
+    idx += 1;
+    if (idx >= QUIZ.length) renderResult();
+    else renderQuestion();
+  }
+
+  function renderResult() {
+    clearTimers();
+    locked = true;
+
+    const total = QUIZ.length;
+    const pct = Math.round((score / total) * 100);
+
+    roundPill.textContent = "Finished";
+    scorePill.textContent = `Score: ${score}`;
+
+    questionText.textContent = `${pct}% (${score}/${total})`;
+    hintText.textContent = "Done! Want to try again?";
+
+    choicesArea.innerHTML = "";
+    timerBar.style.transform = "scaleX(0)";
+
+    restartBtn.style.display = "block";
+  }
+
+  restartBtn.addEventListener("click", () => {
+    clearTimers();
+    idx = 0;
+    score = 0;
+    locked = false;
+    renderQuestion();
+  });
+
+  // Start
+  renderQuestion();
+</script>
+</body>
+</html>
